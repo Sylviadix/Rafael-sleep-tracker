@@ -53,6 +53,10 @@ body { background:var(--bg); color:var(--ink); font-family:'Instrument Sans',san
 .colon.blink { animation:blink 1s step-end infinite; }
 @keyframes blink { 50%{opacity:.15} }
 .tsince { font-size:0.62rem; color:var(--mid); margin-top:5px; min-height:14px; }
+.t-adjust { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
+.t-adjust label { font-size:0.6rem; text-transform:uppercase; letter-spacing:.08em; color:var(--mid); white-space:nowrap; }
+.t-adjust input { flex:1; padding:7px 10px; border:1px solid var(--faint); border-radius:8px; font-family:'Instrument Sans',sans-serif; font-size:0.85rem; color:var(--ink); background:var(--bg); outline:none; transition:border-color .15s; }
+.t-adjust input:focus { border-color:var(--ink); }
 .tbtns { display:flex; gap:8px; }
 .btn-go { flex:1; padding:12px; border-radius:10px; border:none; cursor:pointer; font-family:'Instrument Sans',sans-serif; font-size:0.76rem; font-weight:500; transition:all .15s; background:var(--ink); color:#fff; }
 .btn-go.nap   { background:var(--nap); }
@@ -145,6 +149,10 @@ body { background:var(--bg); color:var(--ink); font-family:'Instrument Sans',san
       <button class="ttab on-nap"  id="tt-nap"   onclick="setTType('nap')">☀️ Nap</button>
       <button class="ttab"         id="tt-night"  onclick="setTType('night')">🌙 Night</button>
     </div>
+    <div class="t-adjust" id="tAdjust">
+      <label>Adjust start time</label>
+      <input type="time" id="tManualStart" />
+    </div>
     <div class="tface">
       <div class="tdigits" id="tdig">
         <span id="th">00</span><span class="colon" id="c1">:</span><span id="tm">00</span><span class="colon" id="c2">:</span><span id="ts">00</span>
@@ -215,7 +223,12 @@ const hist = [
 ];
 
 const KEY = () => new Date().toISOString().split('T')[0];
-let log = JSON.parse(localStorage.getItem('rafa2_'+KEY())||'[]');
+function yesterday(){ const d=new Date(); d.setDate(d.getDate()-1); return d.toISOString().split('T')[0]; }
+// Load today + yesterday (night sleep starts yesterday, ends today)
+let log = [
+  ...JSON.parse(localStorage.getItem('rafa2_'+KEY())||'[]'),
+  ...JSON.parse(localStorage.getItem('rafa2_'+yesterday())||'[]').filter(e=>e.type==='night')
+];
 let tType='nap', tRunning=false, tStart=null, tStop=null, tTick=null;
 let mType='nap', editId=null;
 
@@ -245,10 +258,21 @@ function setTType(t){
 
 function toggleTimer(){
   if(!tRunning){
-    tStart=new Date(); tStop=null; tRunning=true;
+    // Use manual start override if set
+    const manualVal = document.getElementById('tManualStart').value;
+    if(manualVal){
+      const [mh,mm] = manualVal.split(':').map(Number);
+      tStart = new Date(); tStart.setHours(mh,mm,0,0);
+      // If set time is in the future (user made mistake), clamp to now
+      if(tStart > new Date()) tStart = new Date();
+    } else {
+      tStart = new Date();
+    }
+    tStop=null; tRunning=true;
     document.getElementById('btnGo').className='btn-go stop';
     document.getElementById('btnGo').textContent='⏹ Stop';
     document.getElementById('btnSv').classList.remove('show');
+    document.getElementById('tAdjust').style.display='none';
     document.getElementById('tdig').className='tdigits run-'+tType;
     document.getElementById('timerCard').className='timer-card act-'+tType;
     document.getElementById('c1').className=document.getElementById('c2').className='colon blink';
@@ -259,6 +283,7 @@ function toggleTimer(){
     document.getElementById('btnGo').className='btn-go '+tType;
     document.getElementById('btnGo').textContent='▶ Restart';
     document.getElementById('btnSv').classList.add('show');
+    document.getElementById('tAdjust').style.display='flex';
     document.getElementById('tdig').className='tdigits';
     document.getElementById('timerCard').className='timer-card';
     document.getElementById('c1').className=document.getElementById('c2').className='colon';
@@ -285,6 +310,8 @@ function saveTimer(){
   document.getElementById('btnGo').className='btn-go '+tType;
   document.getElementById('btnGo').textContent='▶ Start';
   document.getElementById('btnSv').classList.remove('show');
+  document.getElementById('tAdjust').style.display='flex';
+  document.getElementById('tManualStart').value='';
   document.getElementById('tsince').textContent='';
   document.getElementById('tdig').className='tdigits';
   document.getElementById('timerCard').className='timer-card';
@@ -338,11 +365,27 @@ function addEntry(type,date,start,end,dur){
   save(); render(); updatePred(); showNapWin();
 }
 function deleteEntry(id){ log=log.filter(e=>e.id!==id); save(); render(); updatePred(); showNapWin(); }
-function save(){ localStorage.setItem('rafa2_'+KEY(),JSON.stringify(log)); }
+function save(){
+  // Group entries by their own date and save each bucket separately
+  const byDate = {};
+  log.forEach(e=>{
+    const d = e.date || KEY();
+    if(!byDate[d]) byDate[d]=[];
+    byDate[d].push(e);
+  });
+  Object.entries(byDate).forEach(([date, entries])=>{
+    localStorage.setItem('rafa2_'+date, JSON.stringify(entries));
+  });
+}
 
 function render(){
   const list=document.getElementById('logList');
-  const today=log.filter(e=>e.date===KEY()).sort((a,b)=>a.start.localeCompare(b.start));
+  // Show: entries dated today, OR night sleeps from yesterday that end today/this morning
+  const today=log.filter(e=>{
+    if(e.date===KEY()) return true;
+    if(e.type==='night' && e.date===yesterday()) return true;
+    return false;
+  }).sort((a,b)=>a.start.localeCompare(b.start));
   if(!today.length){ list.innerHTML='<div class="empty">Nothing logged yet today</div>'; return; }
   const napTotal   = today.filter(e=>e.type==='nap').reduce((s,e)=>s+e.dur,0);
   const nightTotal = today.filter(e=>e.type==='night').reduce((s,e)=>s+e.dur,0);
