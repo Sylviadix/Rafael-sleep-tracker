@@ -296,13 +296,20 @@ function setMType(t){
   mType=t;
   document.getElementById('mp-nap').className  ='tpill'+(t==='nap'  ?' nap':'');
   document.getElementById('mp-night').className='tpill'+(t==='night'?' night':'');
+  calcMDur();
 }
-function calcMDur(){ const d=getDur('mS','mE'); document.getElementById('mDur').textContent=d>=0?fmtDur(d):'—'; }
+function calcMDur(){
+  const d=getDur('mS','mE');
+  document.getElementById('mDur').textContent = d>0 ? fmtDur(d) : '—';
+}
 function manualLog(){
-  const s=document.getElementById('mS').value, e=document.getElementById('mE').value, d=document.getElementById('mDate').value;
+  const s=document.getElementById('mS').value;
+  const e=document.getElementById('mE').value;
+  const d=document.getElementById('mDate').value;
+  if(!s||!e||!d){ toast('Fill in all fields'); return; }
   const dur=getDur('mS','mE');
-  if(!s||!e||dur<=0){toast('Check times');return;}
-  addEntry(mType,d,s,e,dur);
+  if(dur<1){ toast('End time must be after start'); return; }
+  addEntry(mType, d, s, e, dur);
   toast((mType==='nap'?'☀️ Nap':'🌙 Night')+' logged!');
 }
 
@@ -337,7 +344,18 @@ function render(){
   const list=document.getElementById('logList');
   const today=log.filter(e=>e.date===KEY()).sort((a,b)=>a.start.localeCompare(b.start));
   if(!today.length){ list.innerHTML='<div class="empty">Nothing logged yet today</div>'; return; }
-  list.innerHTML=today.map(e=>`
+  const napTotal   = today.filter(e=>e.type==='nap').reduce((s,e)=>s+e.dur,0);
+  const nightTotal = today.filter(e=>e.type==='night').reduce((s,e)=>s+e.dur,0);
+  const totalAll   = napTotal + nightTotal;
+  const totalsHTML = `
+    <div class="totals-bar">
+      <div class="tot-item"><div class="tot-lbl">☀️ Nap</div><div class="tot-val">${napTotal>0?fmtDur(napTotal):'—'}</div></div>
+      <div class="tot-sep"></div>
+      <div class="tot-item"><div class="tot-lbl">🌙 Night</div><div class="tot-val">${nightTotal>0?fmtDur(nightTotal):'—'}</div></div>
+      <div class="tot-sep"></div>
+      <div class="tot-item"><div class="tot-lbl">Total</div><div class="tot-val">${fmtDur(totalAll)}</div></div>
+    </div>`;
+  list.innerHTML = totalsHTML + today.map(e=>`
     <div class="log-item">
       <div class="li-dot ${e.type}"></div>
       <div class="li-body">
